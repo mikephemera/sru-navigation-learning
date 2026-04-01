@@ -38,12 +38,9 @@ class OnPolicyRunner:
         # Video recording (initialized lazily, enabled via set_video_recording)
         self.video_recorder: VideoRecorder | None = None
 
-        obs, extras = self.env.get_observations()
-        num_obs = obs.shape[1]
-        if "critic" in extras["observations"]:
-            num_critic_obs = extras["observations"]["critic"].shape[1]
-        else:
-            num_critic_obs = num_obs
+        obs = self.env.get_observations()
+        num_obs = obs["policy"].shape[1]
+        num_critic_obs = obs["critic"].shape[1]
         actor_critic_class = eval(self.policy_cfg.pop("class_name"))
         print("num obs", num_obs)
         print("num critic obs", num_critic_obs)
@@ -127,9 +124,10 @@ class OnPolicyRunner:
             self.env.episode_length_buf = torch.randint_like(
                 self.env.episode_length_buf, high=int(self.env.max_episode_length)
             )
-        obs, extras = self.env.get_observations()
-        critic_obs = extras["observations"].get("critic", obs)
-        obs, critic_obs = obs.to(self.device), critic_obs.to(self.device)
+        obs = self.env.get_observations()
+        policy_obs = obs["policy"]
+        critic_obs = obs["critic"]
+        policy_obs, critic_obs = policy_obs.to(self.device), critic_obs.to(self.device)
         self.train_mode()
 
         ep_infos = []
@@ -158,7 +156,7 @@ class OnPolicyRunner:
             # Rollout
             with torch.no_grad():
                 for i in range(self.num_steps_per_env):
-                    actions = self.alg.act(obs, critic_obs)
+                    actions = self.alg.act(policy_obs, critic_obs)
                     obs, rewards, dones, infos = self.env.step(actions)
 
                     # Capture video frame if recording
@@ -170,13 +168,10 @@ class OnPolicyRunner:
                     if self.is_mdpo and reward_shifting_value != 0.0:
                         rewards = rewards + reward_shifting_value
 
-                    obs = self.obs_normalizer(obs)
-                    if "critic" in infos["observations"]:
-                        critic_obs = self.critic_obs_normalizer(infos["observations"]["critic"])
-                    else:
-                        critic_obs = obs
-                    obs, critic_obs, rewards, dones = (
-                        obs.to(self.device),
+                    policy_obs = self.obs_normalizer(obs["policy"])
+                    critic_obs = self.critic_obs_normalizer(obs["critic"])
+                    policy_obs, critic_obs, rewards, dones = (
+                        policy_obs.to(self.device),
                         critic_obs.to(self.device),
                         rewards.to(self.device),
                         dones.to(self.device),
